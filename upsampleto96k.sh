@@ -1,128 +1,162 @@
-#!/bin/bash
+#!/bin/sh
 
-# Script to resample 24 bit flac files to 96KHz using the Shibatch SRC
-# in twopass non-fast mode while preserving the flac metadata stored
-# in the original files.
 #
-# Background:
-# http://www.lacocina.nl/artikelen/how-to-setup-a-bit-perfect-digital-audio-streaming-client-with-free-software-with-ltsp-and-mpd
+# Copyright 2011, 2012 Ronald van Engelen <rvengelen@hethooghuis.nl>,
+# distributed under the terms of the GNU General Public License
+# version 2 or any later version.
 # 
-#  88.2 KHz DVD-audio files are upsampled to 96KHz (ratio 147:160)
-# 176.4 KHz files are downsampled to 96Khz (ratio 80:147)
-# 192.0 KHz files are downsampled to 96Khz (ratio 2:1)
-#
-# Change gcc of shiboleth Makefile to compile on Debian/Ubuntu
-# $(CC) $(CFLAGS) ssrc.c fftsg_ld.c dbesi0.c -o ssrc -lm
-#                                                    ^^^
-# author: ronalde
-# version: 0.1
-# may 2011
 
-# Shibatch sampling rate converter version 1.30
-#SSRC=~/ssrc-1.30/ssrc_hp
-SSRC=~/ssrc-1.30/ssrc
-# download URL
-SSRCSRC="http://shibatch.sourceforge.net/"
-# Options to pass to the converter, example for 96.000 KHz using best
-# profile using two passes
-TARGETBITDEPTH="24"
-TARGETSAMPLERATE="96000"
-# use these options for ssrc
-#SSRCOPTS="--rate ${TARGETSAMPLERATE} --twopass --quiet --profile standard"
-# use these options for ssrc_hp
-SSRCOPTS="--rate ${TARGETSAMPLERATE} --twopass --quiet"
-# Filename for the tarball containing the source flac files
-SRCFLACTAR="original-flacs.tar"
+# set -e
 
-FLAC=$(which flac)
-METAFLAC=$(which metaflac)
+usage() {
+cat <<EOF
+$0 [OPTION] command directory
 
-# Test existence of ssrc command
-if  ! [ -x "${SSRC}" ]; then
-    echo "Error: Missing shibatch sampling rate converter in \`${SSRC}'."
-    echo "       Please make sure it is compiled from ${SSRCSRC} and " \
-	"marked as executable."
-    exit
-fi
+Resamples flac or wav files in the current directory tot the specified
+bit depth and sample rate. Defaults to only upsample to 96Khz/24bit.
 
-# Test existence of flac command
-if  ! [ -x "${FLAC}" ]; then
-    echo "Error: Missing flac converter in \`${PATH}'."
-    echo "       Please make sure it is installed."
-    exit
-fi
+  -s, --samplerate     Target sample rate in Hz (defaults to 96000)
+  -b, --bitdepth       Target bit depth (defaults to 24)
+  -l, --list           List sample rates of source flac files
+  -d, --downsample     Limit resampling to downsampling (default: false)
+  -u, --upsample       Limit resampling to upsampling (default: true)
+  -p, --purge          Remove original flac files after resampling  (defaults to keep)
+  -h, --help           Show this help message
+EOF
+}
 
-# Test existence of metaflac command
-if  ! [ -x "${METAFLAC}" ]; then
-    echo "Error: Missing metaflac in \`${PATH}'."
-    echo "       Please make sure it is installed."
-    exit
-fi
+check_sanity() {
+
+    test -x "$(which $SSRC)" || die "Error: command 'ssrc_hp' not found"
+    test -x "$(which flac)" || die "Error: command 'flac' not found"
+    test -x "$(which metaflac)" || die "Error: command 'metaflac' not found"
+
+    if [ ! -n "$DIR" ] ; then
+	DIR=$(pwd)
+    fi
+
+}
+
+analyze_command_line() {
+    local done_opts
+
+    while [ -z "$done_opts" ] ; do
+        case "$1" in
+            -b|--bitdepth) BITDEPTH=$(echo $2 | sed -e "s,',,g") ; shift 2 ;;
+            -d|--downsample) DOWNSAMPLE=true; shift 1 ;;
+            -h|--help) usage ; exit 0 ;;
+            -l|--list) LIST=true ; shift 1 ;;
+            -u|--upsample) UPSAMPLE=true; shift 1 ;;
+            -p|--purge) PURGE=true; shift 1 ;;
+            -s|--samplerate) SAMPLERATE=$(echo $2 | sed -e "s,',,g") ; shift 2 ;;
+            --) shift ; done_opts=true ;;
+            *) die "$0: Error: Invalid command parameter!" ;;
+        esac
+    done
+    #DIR=$(echo "$@" | sed 's/\\//')
+    DIR="$@"
+}
+
+default_options() {
+
+    if [ ! -n "$SAMPLERATE" ]; then
+	SAMPLERATE="96000"
+    fi
+
+    if [ ! -n "$BITDEPTH" ]; then
+	BITDEPTH="24"
+    fi
+
+    SSRC=ssrc_hp
+    SSRCOPTS="--rate $SR --bits $BD --twopass --quiet"
+
+    # Filename for the tarball containing the source flac files
+    SRCFLACTAR="original-flacs.tar"
+
+}
+
+
+resample() {
+    ${SSRC} $SSRCOPTS "$SOURCEWAV" "$TARGETWAV"
+}
+
+
+list_sourcefiles() {
+
+    #if [ -d "$DIR" ]; then
+	FLACS=$(find "$DIR" -maxdepth 1 -name "*.flac")
+	WAVS=$(find "$DIR" -maxdepth 1 -name "*.wav")
+	if [ -n "$FLACS" ] || [ -n "$WAVS" ]; then
+	    echo "Found the following files:"
+	    echo "$FILES"
+	else
+	    die "No flac or wav files found in directory '$1'"
+	fi
+    #else
+#	echo "Error: $DIR is not a directory"
+ #   fi
+
+}
+
+flacs() {
 
 # Test existence of backup tarball
-if [ -f "${SRCFLACTAR}" ]; then
-    echo "Error: It seems you have converted this directory before."
-    echo "       If not, remove \`${SRCFLACTAR}' and try again."
-    exit
-fi
-
-# Test existence of files with .flac extension in current directory
-FLACS=$(find . -maxdepth 1 -name "*.flac")
-if [ -z "${FLACS}" ]; then
-    echo "Error: There are no flac files in the current directory"
-    exit
-fi
-
+    if [ -f "${SRCFLACTAR}" ]; then
+	echo "Error: It seems you have converted this directory before. /
+           If not, remove \`${SRCFLACTAR}' and try again."
+	exit
+    fi
+    
 # Temporary sub directory for storing intermediate files
 # will be cleaned afterwards
-TMPTARGET=$(mktemp -d "original.XXXXXXXXXX")
+    TMPTARGET=$(mktemp -d "original.XXXXXXXXXX")
 
 # Save internal field separator of bash,
 # will be restored afterwards
-SAVEIFS=$IFS
-IFS=$(echo -en "\n\b")
+    SAVEIFS=$IFS
+    IFS=$(echo -en "\n\b")
 
 # Process each file with .flac extension in current directory
-for f in *.flac
-do
-    SRCFLAC="$f"
+    for f in *.flac
+    do
+	SRCFLAC="$f"
     # Test whether this is a real FLAC file
-    SRCFLACMIME=$(file -b "${SRCFLAC}" | cut -d' ' -f1)
-    if [ "${SRCFLACMIME}" != "FLAC" ]; then
-	echo "Warning: not processing \`${SRCFLAC}'; it seems not to be a FLAC-file."
-    else
-	SRCSAMPLERATE=$(${METAFLAC} --show-sample-rate "${SRCFLAC}")
-	SRCBITDEPTH=$(${METAFLAC} --show-bps "${SRCFLAC}")
-	echo "Processing file \`${SRCFLAC}'"
-	echo " ... will convert from ${SRCBITDEPTH}bit/${SRCSAMPLERATE}Hz to ${TARGETBITDEPTH}bit/${TARGETSAMPLERATE}Hz"
+	SRCFLACMIME=$(file -b "${SRCFLAC}" | cut -d' ' -f1)
+	if [ "${SRCFLACMIME}" != "FLAC" ]; then
+	    echo "Warning: not processing \`${SRCFLAC}'; it seems not to be a FLAC-file."
+	else
+	    SRCSAMPLERATE=$(${METAFLAC} --show-sample-rate "${SRCFLAC}")
+	    SRCBITDEPTH=$(${METAFLAC} --show-bps "${SRCFLAC}")
+	    echo "Processing file \`${SRCFLAC}'"
+	    echo " ... will convert from ${SRCBITDEPTH}bit/${SRCSAMPLERATE}Hz to ${TARGETBITDEPTH}bit/${TARGETSAMPLERATE}Hz"
         # Extract basename (ie filename without extension) 
-	BASENAME=$(echo "${SRCFLAC}" | cut -d \. -f 1 -)
-	TARGETWAV="${BASENAME}.wav"
+	    BASENAME=$(echo "${SRCFLAC}" | cut -d \. -f 1 -)
+	    TARGETWAV="${BASENAME}.wav"
         # Try to decode original flac file to wav file in temp directory 
-	echo " ... decoding to PCM"
-	if $(${FLAC} -s -d -o "${TMPTARGET}/${TARGETWAV}" "${SRCFLAC}"); then
+	    echo " ... decoding to PCM"
+	    if $(${FLAC} -s -d -o "${TMPTARGET}/${TARGETWAV}" "${SRCFLAC}"); then
 	    # Move original FLAC to temporary directory
-	    mv "${SRCFLAC}" "${TMPTARGET}"
+		mv "${SRCFLAC}" "${TMPTARGET}"
             # Upsample original wav according to SSRCOPTS
-	    echo " ... resampling"
-	    if $(${SSRC} --rate 96000 --twopass --quiet --profile standard "${TMPTARGET}/${TARGETWAV}" "${TMPTARGET}/Upsampled ${TARGETWAV}"); then
+		echo " ... resampling"
+		if $(resample ${SSRC} --rate 96000 --twopass --quiet --profile standard "${TMPTARGET}/${TARGETWAV}" "${TMPTARGET}/Upsampled ${TARGETWAV}" ); then
                 # Encode upsampled wav file to flac
-		echo " ... recoding with flac"
-		$(${FLAC} -s "${TMPTARGET}/Upsampled ${TARGETWAV}" -o "${SRCFLAC}")
+		    echo " ... recoding with flac"
+		    $(${FLAC} -s "${TMPTARGET}/Upsampled ${TARGETWAV}" -o "${SRCFLAC}")
                 # Store flac tags from original flac file in upsampled flac file
- 		$(${METAFLAC} --export-tags-to - "${TMPTARGET}/${SRCFLAC}" | ${METAFLAC} --import-tags-from - "${SRCFLAC}")
-		echo " done."
-	    else
-	    	echo "Error: Could not convert \`${TMPTARGET}/${TARGETWAV}' to \`${TMPTARGET}/Upsampled ${TARGETWAV}'"
-	    	echo "       Please review those temporary files and converter output."
+ 		    $(${METAFLAC} --export-tags-to - "${TMPTARGET}/${SRCFLAC}" | ${METAFLAC} --import-tags-from - "${SRCFLAC}")
+		    echo " done."
+		else
+	    	    echo "Error: Could not convert \`${TMPTARGET}/${TARGETWAV}' to \`${TMPTARGET}/Upsampled ${TARGETWAV}'"
+	    	    echo "       Please review those temporary files and converter output."
+		fi
 	    fi
 	fi
-    fi
-done
+    done
 
-if [ -d "${TMPTARGET}" ]; then
+    if [ -d "${TMPTARGET}" ]; then
     # HARRY=$(tar cf "${SRCFLACTAR}" "${TMPTARGET}")
-    $(tar cf "${SRCFLACTAR}" "${TMPTARGET}")
+	$(tar cf "${SRCFLACTAR}" "${TMPTARGET}")
     # if [ $HARRY ] ; then
     # 	echo "Done!"
     # 	echo "... original flac files copied to tarball \`original-882000-flac.tar'"
@@ -132,6 +166,115 @@ if [ -d "${TMPTARGET}" ]; then
     # 	echo "Error creating tarball of original flac files"
     # 	echo "... please review the temporary files in \`${TMPTARGET}'"
     # fi
+    fi
+    
+    IFS=${SAVEIFS}
+
+}
+
+# Common functions shared by upsample scripts
+
+die() {
+    echo "$@" >&2
+    exit 1
+}
+
+boolean_is_true() {
+    case $1 in
+       # match all cases of true|y|yes
+       [Tt][Rr][Uu][Ee]|[Yy]|[Yy][Ee][Ss]) return 0 ;;
+       *) return 1 ;;
+    esac
+}
+
+
+# list files in a directory consisting only of alphanumerics, hyphens and
+# underscores
+# $1 - directory to list
+# $2 - optional prefix to limit which files are selected
+run_parts_list() {
+    test $# -ge 1 || die "ERROR: Usage: run_parts_list <dir>"
+    if [ -d "$1" ]; then
+        find -L "$1" -mindepth 1 -maxdepth 1 -type f -name "$2*" |
+            sed -n '/.*\/[0-9a-zA-Z_\-]\{1,\}$/p' | sort -n
+    fi
+}
+
+
+# Remember mounted dirs so that it's easier to unmount them with a single call
+# to umount_marked. They'll be unmounted in reverse order.
+# Use the normal mount syntax, e.g.
+#   mark_mount -t proc proc "$ROOT/proc"
+mark_mount() {
+    local dir
+
+    # The last parameter is the dir we need to remember to unmount
+    dir=$(eval "echo \$$#")
+    if mount "$@"; then
+        # Use newlines to separate dirs, in case they contain spaces
+        if [ -z "$MARKED_MOUNTS" ]; then
+            MARKED_MOUNTS="$dir"
+        else
+            MARKED_MOUNTS="$dir $MARKED_MOUNTS"
+        fi
+    else
+        die "Could not mount $dir."
+    fi
+}
+
+umount_marked() {
+    [ -z "$MARKED_MOUNTS" ] && return
+
+    echo "$MARKED_MOUNTS" | while read dir; do
+        # binfmt_misc might need to be unmounted manually, see LP #534211
+        if [ "$dir%/proc}" != "$dir" ] && 
+            ( [ "$VENDOR" = "Debian" ] || [ "$VENDOR" = "Ubuntu" ] ) &&
+            [ -d "$dir/sys/fs/binfmt_misc" ] && [ -f "$dir/mounts" ] &&
+            grep -q "^binfmt_misc $dir/sys/fs/binfmt_misc" "$dir/mounts"; then
+            if ! umount "$dir/sys/fs/binfmt_misc"; then
+                echo "Couldn't unmount $dir/sys/fs/binfmt_misc." >&2
+            fi
+        fi
+        if ! umount "$dir"; then
+            echo "Couldn't unmount $dir." >&2
+        fi
+    done
+}
+
+
+
+
+# Main
+
+
+# Parse command line arguments
+if ! ARGS=$(getopt -n "$0" -o +a:b:cdhmpr -l \
+    'samplerate:,bitdepth:,list,upsample,downsample,purge,help' -- "$@"); then
+    exit 1
 fi
 
-IFS=${SAVEIFS}
+# source the generic functions
+ . ./get-samplerate
+ . ./get-bitdepth
+
+# include the configuration file if it exists
+#if [ -f /etc/resample/resample.conf ]; then
+#    . /etc/resample/resample.conf
+#fi
+
+# parse commandline parameters
+analyze_command_line $ARGS
+
+# get defaults
+default_options
+
+# check existence of programs
+check_sanity
+
+# verify samplerate and bitdepth
+get_samplerate $SAMPLERATE
+get_bitdepth $BITDEPTH
+
+
+echo "Preparing to process $DIR"
+list_sourcefiles "$DIR"

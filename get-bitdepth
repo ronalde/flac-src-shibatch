@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# returns the variable BD containing '16', '18', '22' or '24'
+# returns error 1 when other depth is chosen
+
+get_bitdepth(){
+
+    VALIDDEPTHS="'16', '18', '22' or '24'"
+    BD=$(echo $1 | sed 's/\([0-9]*\)[ A-Za-z]*/\1/')
+    case $BD in
+	16|18|20|24) 
+	    echo "Target bitdepth: $BD bits"
+	    return 0 ;;
+	*) 
+	    echo "Error: Invalid target bitdepth ($BD bits) specified, use any of:"
+	    echo "       $VALIDDEPTHS"
+	    return 1 ;;
+    esac
+
+}
+
+## usage example:
+#BLA="16 bits"
+#if get_bitdepth $BLA; then
+#    echo "bitdepth: $BD"
+#else
+#    echo "error: bitdepth ($BD) should be 16 or 24"
+#fi
+

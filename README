@@ -1,0 +1,29 @@
+README for resample296k
+=======================
+
+ version: 0.2 (march 2012)
+
+Script to resample 24 bit flac files to 96KHz using the Shibatch SRC
+in twopass non-fast mode while preserving the flac metadata stored
+in the original files.
+
+Requirements:
+ssrc (>= 1.3)
+flac
+
+Installation of the former commands can be achieved on Debian based systems by executing:
+apt-get install flac ssrc
+
+Background:
+http://www.lacocina.nl/artikelen/how-to-setup-a-bit-perfect-digital-audio-streaming-client-with-free-software-with-ltsp-and-mpd
+
+Default conversions: 
+  88.2 KHz DVD-audio files are upsampled to 96KHz (ratio 147:160)
+ 176.4 KHz files are downsampled to 96Khz (ratio 80:147)
+ 192.0 KHz files are downsampled to 96Khz (ratio 2:1)
+
+Copyright 2011, 2012 Ronald van Engelen <rvengelen@hethooghuis.nl>,
+distributed under the terms of the GNU General Public License
+version 2 or any later version.
+ 
+ 
