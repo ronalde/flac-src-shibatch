@@ -10,7 +10,7 @@
 
 usage() {
 cat <<EOF
-$0 [OPTION] command directory
+$0 [ -s | --samplerate <samplerate> ] [ -b | --bitdepth <bitdepth> ] [ <other options> ]  -- directory
 
 Resamples flac or wav files in the current directory tot the specified
 bit depth and sample rate. Defaults to only upsample to 96Khz/24bit.
@@ -32,7 +32,7 @@ check_sanity() {
     test -x "$(which metaflac)" || die "Error: command 'metaflac' not found"
 
     if [ ! -n "$DIR" ] ; then
-	DIR=$(pwd)
+	DIR="$(pwd)"
     fi
 
 }
@@ -49,12 +49,22 @@ analyze_command_line() {
             -u|--upsample) UPSAMPLE=true; shift 1 ;;
             -p|--purge) PURGE=true; shift 1 ;;
             -s|--samplerate) SAMPLERATE=$(echo $2 | sed -e "s,',,g") ; shift 2 ;;
-            --) shift ; done_opts=true ;;
-            *) die "$0: Error: Invalid command parameter!" ;;
+            *) 
+		done_opts=true
+		if [ ! -d "$@" ]; then
+		    die "Error: Invalid path $@"
+		fi
+		;;
+            #*) 
         esac
     done
     #DIR=$(echo "$@" | sed 's/\\//')
-    DIR="$@"
+    DIR="${@}"
+    if [ -d "$DIR" ] ; then
+	echo "Dir $DIR is a dir"
+    else
+	echo "Not a dir: $DIR"
+    fi
 }
 
 default_options() {
@@ -83,18 +93,29 @@ resample() {
 
 list_sourcefiles() {
 
-    #if [ -d "$DIR" ]; then
-	FLACS=$(find "$DIR" -maxdepth 1 -name "*.flac")
-	WAVS=$(find "$DIR" -maxdepth 1 -name "*.wav")
-	if [ -n "$FLACS" ] || [ -n "$WAVS" ]; then
-	    echo "Found the following files:"
-	    echo "$FILES"
+    #echo "Dir: ${DIR}"
+    #FDIR=$(find "$DIR" -type d)
+    if [ -d "$DIR" ]; then
+	if [ -w "$DIR" ]; then
+	    FLACS=$(find "$DIR" -maxdepth 1 -name "*.flac")
+	    WAVS=$(find "$DIR" -maxdepth 1 -name "*.wav")
+	    if [ -n "$FLACS" ] || [ -n "$WAVS" ]; then
+		echo "Found the following files:"
+		if [ -n "$FLACS" ]; then
+		    echo "$FLACS"
+		fi
+		if [ -n "$WAVS" ]; then
+		    echo "$WAVS"
+		fi
+	    else
+		die "Error: No flac or wav files found in directory $DIR"
+	    fi
 	else
-	    die "No flac or wav files found in directory '$1'"
+	    die "Error: No write permissions in directory $DIR"    
 	fi
-    #else
-#	echo "Error: $DIR is not a directory"
- #   fi
+    else
+	echo "Error: $DIR is not a directory"
+    fi
 
 }
 
@@ -263,7 +284,7 @@ fi
 #fi
 
 # parse commandline parameters
-analyze_command_line $ARGS
+analyze_command_line "$@"
 
 # get defaults
 default_options
