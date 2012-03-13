@@ -9,7 +9,7 @@ get_bitdepth(){
     BD=$(echo $1 | sed 's/\([0-9]*\)[ A-Za-z]*/\1/')
     case $BD in
 	16|18|20|24) 
-	    echo "Target bitdepth: $BD bits"
+	    echo "  Bitdepth: $BD bits"
 	    return 0 ;;
 	*) 
 	    echo "Error: Invalid target bitdepth ($BD bits) specified, use any of:"

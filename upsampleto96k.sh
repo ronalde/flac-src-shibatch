@@ -60,11 +60,6 @@ analyze_command_line() {
     done
     #DIR=$(echo "$@" | sed 's/\\//')
     DIR="${@}"
-    if [ -d "$DIR" ] ; then
-	echo "Dir $DIR is a dir"
-    else
-	echo "Not a dir: $DIR"
-    fi
 }
 
 default_options() {
@@ -82,7 +77,6 @@ default_options() {
 
     # Filename for the tarball containing the source flac files
     SRCFLACTAR="original-flacs.tar"
-
 }
 
 
@@ -93,20 +87,21 @@ resample() {
 
 list_sourcefiles() {
 
-    #echo "Dir: ${DIR}"
-    #FDIR=$(find "$DIR" -type d)
     if [ -d "$DIR" ]; then
 	if [ -w "$DIR" ]; then
-	    FLACS=$(find "$DIR" -maxdepth 1 -name "*.flac")
-	    WAVS=$(find "$DIR" -maxdepth 1 -name "*.wav")
-	    if [ -n "$FLACS" ] || [ -n "$WAVS" ]; then
+	    FILES=$(find "$DIR" -maxdepth 1 -iname "*.flac" -or -iname "*.wav")
+
+	    if [ -n "$FILES" ] ; then
 		echo "Found the following files:"
-		if [ -n "$FLACS" ]; then
-		    echo "$FLACS"
-		fi
-		if [ -n "$WAVS" ]; then
-		    echo "$WAVS"
-		fi
+		echo "$FILES" | while read FILE
+		do 
+		    echo "$FILE"
+		    analyze_file "$FILE"
+		done
+		#
+
+		exit 0
+
 	    else
 		die "Error: No flac or wav files found in directory $DIR"
 	    fi
@@ -209,64 +204,7 @@ boolean_is_true() {
 }
 
 
-# list files in a directory consisting only of alphanumerics, hyphens and
-# underscores
-# $1 - directory to list
-# $2 - optional prefix to limit which files are selected
-run_parts_list() {
-    test $# -ge 1 || die "ERROR: Usage: run_parts_list <dir>"
-    if [ -d "$1" ]; then
-        find -L "$1" -mindepth 1 -maxdepth 1 -type f -name "$2*" |
-            sed -n '/.*\/[0-9a-zA-Z_\-]\{1,\}$/p' | sort -n
-    fi
-}
-
-
-# Remember mounted dirs so that it's easier to unmount them with a single call
-# to umount_marked. They'll be unmounted in reverse order.
-# Use the normal mount syntax, e.g.
-#   mark_mount -t proc proc "$ROOT/proc"
-mark_mount() {
-    local dir
-
-    # The last parameter is the dir we need to remember to unmount
-    dir=$(eval "echo \$$#")
-    if mount "$@"; then
-        # Use newlines to separate dirs, in case they contain spaces
-        if [ -z "$MARKED_MOUNTS" ]; then
-            MARKED_MOUNTS="$dir"
-        else
-            MARKED_MOUNTS="$dir $MARKED_MOUNTS"
-        fi
-    else
-        die "Could not mount $dir."
-    fi
-}
-
-umount_marked() {
-    [ -z "$MARKED_MOUNTS" ] && return
-
-    echo "$MARKED_MOUNTS" | while read dir; do
-        # binfmt_misc might need to be unmounted manually, see LP #534211
-        if [ "$dir%/proc}" != "$dir" ] && 
-            ( [ "$VENDOR" = "Debian" ] || [ "$VENDOR" = "Ubuntu" ] ) &&
-            [ -d "$dir/sys/fs/binfmt_misc" ] && [ -f "$dir/mounts" ] &&
-            grep -q "^binfmt_misc $dir/sys/fs/binfmt_misc" "$dir/mounts"; then
-            if ! umount "$dir/sys/fs/binfmt_misc"; then
-                echo "Couldn't unmount $dir/sys/fs/binfmt_misc." >&2
-            fi
-        fi
-        if ! umount "$dir"; then
-            echo "Couldn't unmount $dir." >&2
-        fi
-    done
-}
-
-
-
-
 # Main
-
 
 # Parse command line arguments
 if ! ARGS=$(getopt -n "$0" -o +a:b:cdhmpr -l \
@@ -277,6 +215,7 @@ fi
 # source the generic functions
  . ./get-samplerate
  . ./get-bitdepth
+ . ./analyze-file
 
 # include the configuration file if it exists
 #if [ -f /etc/resample/resample.conf ]; then
@@ -291,6 +230,11 @@ default_options
 
 # check existence of programs
 check_sanity
+
+if [ $LIST ]; then
+    list_sourcefiles
+fi
+
 
 # verify samplerate and bitdepth
 get_samplerate $SAMPLERATE

@@ -15,10 +15,14 @@ get_samplerate(){
     if [[ $1 == *.* ]] ; then
 	let SR=$( echo "$1*1000" | bc | sed 's/^\(.*\)\..*$/\1/' )
     fi
+
+    if [ $SR -lt 1000 ] ; then
+	let SR=$( echo "$SR*1000" | bc | sed 's/^\(.*\)\..*$/\1/' )	
+    fi
 	
     case $SR in
 	44100|88200|176400|48000|96000|192000) 
-	    echo "Target samplerate: $SR Hz"
+	    echo "  Samplerate: $SR Hz"
 	    return 0 ;;
 	*) 
 	    echo "Error: Invalid samplerate ($SR) specified, use any of:"
