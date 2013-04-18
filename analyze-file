@@ -1,33 +1,37 @@
-#!/bin/sh
-
-# this file is sources
+# this shell script is sourced
 #
 # returns the format, bitrate and samplerate of a file 
 # returns error 1 when the file is does not exist
-
+#
 analyze_file() {
 
-    if [ -f "$FILE" ]; then
-	echo "Analyzing file: $FILE"
-	FILEINFO=$(file -b "$FILE")
-	FILETYPE=$(echo $FILEINFO | awk '{ print $1}')
+    FILE="$1"
+    # set soxi filter labels
+    SOXISE="Sample Encoding: "
+    SOXISR="Sample Rate    : "
+    SOXIBD="Precision      : "
+
+    if [ -f "${FILE}" ]; then
+	
+	FILENAME=$(basename "${FILE}")
+	
+	# call soxi one time per file
+	FILEINFO=$(LANG=C soxi "${FILE}")
+	FILESR=$(echo -e "${FILEINFO}" | grep "${SOXISR}" | sed "s#${SOXISR}##")
+	FILEBD=$(echo -e "${FILEINFO}" | grep "${SOXIBD}" | sed "s#${SOXIBD}\(.*\)-bit#\1#")
+	FILETYPE=$(echo -e "$FILEINFO" | grep "${SOXISE}" | sed "s#${SOXISE}${FILEBD}-bit \(.*\)#\1#")
 	case "$FILETYPE" in
 	    "FLAC")
-		FILEBD=$(echo "$FILEINFO" | awk -F\, '{ print $2}'| sed 's/ //g')
-		FILESR=$(echo "$FILEINFO" | awk -F\, '{ print $4}'| sed 's/ //g')
-		;;
-	    "RIFF")
-		FILEBD=$(echo "$FILEINFO" | awk -F\, '{ print $4}'| sed 's/ //g')
-		FILESR=$(echo "$FILEINFO" | awk -F\, '{ print $5}'| sed 's/^[ a-z]* //g')
 		;;
 	    *)
 		die "Error: $FILE has an unknown filetype";;
 	esac
-	echo "  Filetype:   $FILETYPE"
-	#echo "  Samplerate: $FILESR"
-	#echo "  Bitdepth: $FILEBD"
+
 	get_samplerate "$FILESR"
 	get_bitdepth "$FILEBD"
+
+	echo " \`$FILENAME': $FILETYPE, $FILESR Hz, $FILEBD bit"
+	return 0
 
     else
 	die "Error: no such file $FILE"
@@ -35,3 +39,36 @@ analyze_file() {
     
 }
 
+get_samplerate(){
+
+# returns 0 when valid source has valid sample rate:
+# '44100', 88200' or '176400'
+# '48000', '96000'  or '192000' 
+# dies when source has unknown sample rate
+
+    VALIDRATES="'44100', '88200', '176400', '48000', '96000'  or '192000'"
+    case "$1" in
+	44100|88200|176400|48000|96000|192000) 
+	    return 0 ;;
+	*) 
+	    die "Error: Invalid samplerate ($1) specified, use any of:\n" \
+	    "       $VALIDRATES"
+    esac
+}
+
+
+get_bitdepth(){
+
+# returns 0 when bitdepth is valid
+# dies when source file has unknown bit depth
+
+    VALIDDEPTHS="'16', '18', '22' or '24'"
+    case $1 in
+	16|18|20|24) 
+	    return 0 ;;
+	*) 
+	    die "Error: Invalid target bitdepth ($1 bits) specified, use any of:\n" \
+	    "       $VALIDDEPTHS"
+    esac
+
+}

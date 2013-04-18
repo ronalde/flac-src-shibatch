@@ -25,18 +25,6 @@ bit depth and sample rate. Defaults to only upsample to 96Khz/24bit.
 EOF
 }
 
-check_sanity() {
-
-    test -x "$(which $SSRC)" || die "Error: command 'ssrc_hp' not found"
-    test -x "$(which flac)" || die "Error: command 'flac' not found"
-    test -x "$(which metaflac)" || die "Error: command 'metaflac' not found"
-
-    if [ ! -n "$DIR" ] ; then
-	DIR="$(pwd)"
-    fi
-
-}
-
 analyze_command_line() {
     local done_opts
 
@@ -72,36 +60,30 @@ default_options() {
 	BITDEPTH="24"
     fi
 
+    FLAC="$(which flac)"
+    METAFLAC="$(which metaflac)"
     SSRC=ssrc_hp
-    SSRCOPTS="--rate $SR --bits $BD --twopass --quiet"
+    SSRCOPTS="--rate ${SAMPLERATE} --bits ${BITDEPTH} --twopass --quiet"
+    SSRCOPTS="--rate ${SAMPLERATE} --bits ${BITDEPTH} --twopass"
 
     # Filename for the tarball containing the source flac files
     SRCFLACTAR="original-flacs.tar"
 }
 
 
-resample() {
-    ${SSRC} $SSRCOPTS "$SOURCEWAV" "$TARGETWAV"
-}
-
-
-list_sourcefiles() {
-
+check_sourcedir() {
+    echo "\tChecking sanity of directory ..."
     if [ -d "$DIR" ]; then
 	if [ -w "$DIR" ]; then
+	    if [ -f "$1\${SRCFLACTAR}" ]; then
+		die "Error: It seems you have converted directory \`${DIR}' before. /
+                     If not, remove \`${SRCFLACTAR}' and try again."
+	    fi
 	    FILES=$(find "$DIR" -maxdepth 1 -iname "*.flac" -or -iname "*.wav")
 
 	    if [ -n "$FILES" ] ; then
-		echo "Found the following files:"
-		echo "$FILES" | while read FILE
-		do 
-		    echo "$FILE"
-		    analyze_file "$FILE"
-		done
-		#
-
-		exit 0
-
+		FILECOUNT=$(echo -e "${FILES}" | wc -l)
+		echo "\tCheckes out OK: ${FILECOUNT} source files found"
 	    else
 		die "Error: No flac or wav files found in directory $DIR"
 	    fi
@@ -114,95 +96,137 @@ list_sourcefiles() {
 
 }
 
-flacs() {
-
-# Test existence of backup tarball
-    if [ -f "${SRCFLACTAR}" ]; then
-	echo "Error: It seems you have converted this directory before. /
-           If not, remove \`${SRCFLACTAR}' and try again."
-	exit
-    fi
+list_sourcefiles() {
     
-# Temporary sub directory for storing intermediate files
-# will be cleaned afterwards
-    TMPTARGET=$(mktemp -d "original.XXXXXXXXXX")
+    echo "$FILES" | while read FILE
+    do 
+	#echo "$FILE"
+	analyze_file "$FILE"
+    done
 
-# Save internal field separator of bash,
-# will be restored afterwards
+}
+
+convert_files() {
+
+    # Temporary sub directory for storing intermediate files
+    # will be cleaned afterwards
+    echo " running convert_files on \"$1\":"
+    TMPTARGET=$(mktemp -d "$1/original.XXXXXXXXXX")
+    echo "  created temporary directory \"${TMPTARGET}\""
+
+    # Save internal field separator of bash,
+    # will be restored afterwards
     SAVEIFS=$IFS
     IFS=$(echo -en "\n\b")
 
-# Process each file with .flac extension in current directory
-    for f in *.flac
-    do
-	SRCFLAC="$f"
-    # Test whether this is a real FLAC file
-	SRCFLACMIME=$(file -b "${SRCFLAC}" | cut -d' ' -f1)
-	if [ "${SRCFLACMIME}" != "FLAC" ]; then
-	    echo "Warning: not processing \`${SRCFLAC}'; it seems not to be a FLAC-file."
+    
+    echo "$FILES" | while read FILE
+    do 
+	FILEOK=$(analyze_file "$FILE")
+	if [ -n "$FILEOK" ]; then
+	    convert_file "$FILE"
 	else
-	    SRCSAMPLERATE=$(${METAFLAC} --show-sample-rate "${SRCFLAC}")
-	    SRCBITDEPTH=$(${METAFLAC} --show-bps "${SRCFLAC}")
-	    echo "Processing file \`${SRCFLAC}'"
-	    echo " ... will convert from ${SRCBITDEPTH}bit/${SRCSAMPLERATE}Hz to ${TARGETBITDEPTH}bit/${TARGETSAMPLERATE}Hz"
-        # Extract basename (ie filename without extension) 
-	    BASENAME=$(echo "${SRCFLAC}" | cut -d \. -f 1 -)
-	    TARGETWAV="${BASENAME}.wav"
-        # Try to decode original flac file to wav file in temp directory 
-	    echo " ... decoding to PCM"
-	    if $(${FLAC} -s -d -o "${TMPTARGET}/${TARGETWAV}" "${SRCFLAC}"); then
-	    # Move original FLAC to temporary directory
-		mv "${SRCFLAC}" "${TMPTARGET}"
-            # Upsample original wav according to SSRCOPTS
-		echo " ... resampling"
-		if $(resample ${SSRC} --rate 96000 --twopass --quiet --profile standard "${TMPTARGET}/${TARGETWAV}" "${TMPTARGET}/Upsampled ${TARGETWAV}" ); then
-                # Encode upsampled wav file to flac
-		    echo " ... recoding with flac"
-		    $(${FLAC} -s "${TMPTARGET}/Upsampled ${TARGETWAV}" -o "${SRCFLAC}")
-                # Store flac tags from original flac file in upsampled flac file
- 		    $(${METAFLAC} --export-tags-to - "${TMPTARGET}/${SRCFLAC}" | ${METAFLAC} --import-tags-from - "${SRCFLAC}")
-		    echo " done."
-		else
-	    	    echo "Error: Could not convert \`${TMPTARGET}/${TARGETWAV}' to \`${TMPTARGET}/Upsampled ${TARGETWAV}'"
-	    	    echo "       Please review those temporary files and converter output."
-		fi
-	    fi
+	    die "Error: $FILE is not a usable audio file"
 	fi
     done
-
+    
     if [ -d "${TMPTARGET}" ]; then
-    # HARRY=$(tar cf "${SRCFLACTAR}" "${TMPTARGET}")
-	$(tar cf "${SRCFLACTAR}" "${TMPTARGET}")
-    # if [ $HARRY ] ; then
-    # 	echo "Done!"
-    # 	echo "... original flac files copied to tarball \`original-882000-flac.tar'"
-    # 	echo "... resulting upsampled flac files with metadata available in this directory"
-    #     rm -rf "${TMPTARGET}"
-    # else
-    # 	echo "Error creating tarball of original flac files"
-    # 	echo "... please review the temporary files in \`${TMPTARGET}'"
-    # fi
+	if $(tar cf "$1/${SRCFLACTAR}" "${TMPTARGET}"); then
+	    rm -rf "${TMPTARGET}"
+	    echo "Done!"
+	    echo "... original flac files copied to tarball \"$1/${SRCFLACTAR}\""
+	    echo "... resulting resampled flac files with metadata available in this directory"
+	else
+    	    echo "Error creating tarball of original flac files"
+    	    echo "... please review the temporary files in \`${TMPTARGET}'"
+	fi
     fi
     
     IFS=${SAVEIFS}
 
 }
 
-# Common functions shared by upsample scripts
+decode_flac() {
 
-die() {
-    echo "$@" >&2
-    exit 1
+    # try to decode source flac to wav file in temp directory 
+    echo "  running decode_flac with \"$1\" ($FILETYPE) and \"$2\" (PCM):"
+    if $("${FLAC}" -s -d -o "$2" "$1"); then
+        # move original FLAC to temporary directory
+	mv "$1" "${TMPTARGET}"
+	echo "  [ok]"
+	return 0
+    else
+	die "Error: something went wrong while decoding flac source \"$1\" to \"$2\" ..."
+    fi
 }
 
-boolean_is_true() {
-    case $1 in
-       # match all cases of true|y|yes
-       [Tt][Rr][Uu][Ee]|[Yy]|[Yy][Ee][Ss]) return 0 ;;
-       *) return 1 ;;
-    esac
+resample_wav() {
+    echo " running resample_wav with \"$1\" and \"$2\":"
+    ssrc_hp --rate 96000 --bits 24 --twopass "$1" "$2"
+    echo "  [ok]"
+    # clean up original wav
+    rm "$1"
+    return 0
 }
 
+
+encode_toflac() {
+    
+    echo " running encode_toflac \"$1\" and \"$2\":"
+    if $("${FLAC}" -s "$1" -o "$2" ); then
+	echo " [ok]"
+	# clean up resampled wav
+	rm "$1"
+	return 0
+    else
+	die "Error: something went wrong while encoding \"${RESAMPLEDWAVPATH}\" to \"${SOURCEFLACPATH}\" ..."
+    fi
+}
+
+restore_flactags() {
+    echo " running restore_flactags \"$1\" and \"$2\":"
+    if $("${METAFLAC}" --export-tags-to - "$1" | "${METAFLAC}" --import-tags-from - "$2"); then
+	echo " [ok]"
+    else
+	echo "Error: Could not restore flac tags to \"$2\" ... "
+    fi
+}
+
+convert_file() {
+
+    # /full/path/01file.flac
+    INPUTFILEPATH="$1"
+    # 01file.flac
+    INPUTBASENAME=$(basename "${INPUTFILEPATH}")
+    # flac
+    INPUTEXTENSION="${INPUTBASENAME##*.}"
+    # 01file
+    INPUTNOEXT="${INPUTBASENAME%.*}"
+    # /full/path
+    INPUTDIRPATH=$(dirname "${INPUTFILEPATH}")
+    # 01file.wav
+    WAVFILENAME="${INPUTNOEXT}.wav"
+
+    ORIGINALWAVPATH="${TMPTARGET}/${WAVFILENAME}"
+    RESAMPLEDWAVPATH="${TMPTARGET}/Resampled ${WAVFILENAME}"
+    TMPFLACPATH="${TMPTARGET}/${INPUTBASENAME}"
+    
+
+    echo " running convert_file on \"${INPUTFILEPATH}\""
+
+    analyze_file "${INPUTFILEPATH}"
+
+    echo "  converting from ${FILEBD}-bit/${FILESR} Hz to ${BITDEPTH}-bit/${SAMPLERATE} Hz"
+
+    decode_flac "${INPUTFILEPATH}" "${ORIGINALWAVPATH}"
+
+    resample_wav "${ORIGINALWAVPATH}" "${RESAMPLEDWAVPATH}"
+
+    encode_toflac "${RESAMPLEDWAVPATH}" "${INPUTFILEPATH}"
+
+    restore_flactags "${TMPFLACPATH}" "${INPUTFILEPATH}"
+
+}
 
 # Main
 
@@ -213,8 +237,7 @@ if ! ARGS=$(getopt -n "$0" -o +a:b:cdhmpr -l \
 fi
 
 # source the generic functions
- . ./get-samplerate
- . ./get-bitdepth
+ . ./resample-commonfunctions
  . ./analyze-file
 
 # include the configuration file if it exists
@@ -231,15 +254,19 @@ default_options
 # check existence of programs
 check_sanity
 
-if [ $LIST ]; then
-    list_sourcefiles
-fi
+
+#if [ $LIST ]; then
+#    list_sourcefiles
+#fi
 
 
 # verify samplerate and bitdepth
-get_samplerate $SAMPLERATE
-get_bitdepth $BITDEPTH
+#get_samplerate $SAMPLERATE
+#get_bitdepth $BITDEPTH
 
 
 echo "Preparing to process $DIR"
-list_sourcefiles "$DIR"
+# check sanity of source dir
+check_sourcedir  "$DIR"
+#list_sourcefiles "$DIR"
+convert_files "$DIR"
