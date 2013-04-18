@@ -1,0 +1,30 @@
+# common functions shared by upsample scripts
+# this shell script is sourced by upsample
+
+die() {
+    echo "$@" >&2
+    exit 1
+}
+
+
+boolean_is_true() {
+    case $1 in
+       # match all cases of true|y|yes
+       [Tt][Rr][Uu][Ee]|[Yy]|[Yy][Ee][Ss]) return 0 ;;
+       *) return 1 ;;
+    esac
+}
+
+
+check_sanity() {
+
+    test -x "$(which $SSRC)" || die "Error: command 'ssrc_hp' not found"
+    test -x "$(which flac)" || die "Error: command 'flac' not found"
+    test -x "$(which metaflac)" || die "Error: command 'metaflac' not found"
+    test -x "$(which soxi)" || die "Error: command 'soxi' not found"
+
+    if [ ! -n "$DIR" ] ; then
+	DIR="$(pwd)"
+    fi
+
+}
