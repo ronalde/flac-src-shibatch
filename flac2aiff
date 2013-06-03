@@ -1,0 +1,272 @@
+#!/bin/sh
+
+#
+# Copyright 2011, 2012 Ronald van Engelen <rvengelen@hethooghuis.nl>,
+# distributed under the terms of the GNU General Public License
+# version 2 or any later version.
+# 
+
+# set -e
+
+usage() {
+cat <<EOF
+$0 [ -s | --samplerate <samplerate> ] [ -b | --bitdepth <bitdepth> ] [ <other options> ]  -- directory
+
+Resamples flac or wav files in the current directory tot the specified
+bit depth and sample rate. Defaults to only upsample to 96Khz/24bit.
+
+  -s, --samplerate     Target sample rate in Hz (defaults to 96000)
+  -b, --bitdepth       Target bit depth (defaults to 24)
+  -l, --list           List sample rates of source flac files
+  -d, --downsample     Limit resampling to downsampling (default: false)
+  -u, --upsample       Limit resampling to upsampling (default: true)
+  -p, --purge          Remove original flac files after resampling  (defaults to keep)
+  -h, --help           Show this help message
+EOF
+}
+
+analyze_command_line() {
+    local done_opts
+
+    while [ -z "$done_opts" ] ; do
+        case "$1" in
+            -b|--bitdepth) BITDEPTH=$(echo $2 | sed -e "s,',,g") ; shift 2 ;;
+            -d|--downsample) DOWNSAMPLE=true; shift 1 ;;
+            -h|--help) usage ; exit 0 ;;
+            -l|--list) LIST=true ; shift 1 ;;
+            -u|--upsample) UPSAMPLE=true; shift 1 ;;
+            -p|--purge) PURGE=true; shift 1 ;;
+            -s|--samplerate) SAMPLERATE=$(echo $2 | sed -e "s,',,g") ; shift 2 ;;
+            *) 
+		done_opts=true
+		if [ ! -d "$@" ]; then
+		    die "Error: Invalid path $@"
+		fi
+		;;
+            #*) 
+        esac
+    done
+    #DIR=$(echo "$@" | sed 's/\\//')
+    DIR="${@}"
+}
+
+default_options() {
+
+    if [ ! -n "$SAMPLERATE" ]; then
+	SAMPLERATE="96000"
+    fi
+
+    if [ ! -n "$BITDEPTH" ]; then
+	BITDEPTH="24"
+    fi
+
+    FLAC="$(which flac)"
+    METAFLAC="$(which metaflac)"
+    SSRC=ssrc_hp
+    SSRCOPTS="--rate ${SAMPLERATE} --bits ${BITDEPTH} --twopass --quiet"
+    SSRCOPTS="--rate ${SAMPLERATE} --bits ${BITDEPTH} --twopass"
+
+    # Filename for the tarball containing the source flac files
+    SRCFLACTAR="original-flacs.tar"
+}
+
+
+check_sourcedir() {
+    echo "\tChecking sanity of directory ..."
+    if [ -d "$DIR" ]; then
+	if [ -w "$DIR" ]; then
+	    if [ -f "$1\${SRCFLACTAR}" ]; then
+		die "Error: It seems you have converted directory \`${DIR}' before. /
+                     If not, remove \`${SRCFLACTAR}' and try again."
+	    fi
+	    FILES=$(find "$DIR" -maxdepth 1 -iname "*.flac" -or -iname "*.wav")
+
+	    if [ -n "$FILES" ] ; then
+		FILECOUNT=$(echo -e "${FILES}" | wc -l)
+		echo "\tCheckes out OK: ${FILECOUNT} source files found"
+	    else
+		die "Error: No flac or wav files found in directory $DIR"
+	    fi
+	else
+	    die "Error: No write permissions in directory $DIR"    
+	fi
+    else
+	echo "Error: $DIR is not a directory"
+    fi
+
+}
+
+list_sourcefiles() {
+    
+    echo "$FILES" | while read FILE
+    do 
+	#echo "$FILE"
+	analyze_file "$FILE"
+    done
+
+}
+
+convert_files() {
+
+    # Temporary sub directory for storing intermediate files
+    # will be cleaned afterwards
+    echo " running convert_files on \"$1\":"
+    TMPTARGET=$(mktemp -d "$1/original.XXXXXXXXXX")
+    echo "  created temporary directory \"${TMPTARGET}\""
+
+    # Save internal field separator of bash,
+    # will be restored afterwards
+    SAVEIFS=$IFS
+    IFS=$(echo -en "\n\b")
+
+    
+    echo "$FILES" | while read FILE
+    do 
+	FILEOK=$(analyze_file "$FILE")
+	if [ -n "$FILEOK" ]; then
+	    convert_file "$FILE"
+	else
+	    die "Error: $FILE is not a usable audio file"
+	fi
+    done
+    
+    if [ -d "${TMPTARGET}" ]; then
+	if $(tar cf "$1/${SRCFLACTAR}" "${TMPTARGET}"); then
+	    rm -rf "${TMPTARGET}"
+	    echo "Done!"
+	    echo "... original flac files copied to tarball \"$1/${SRCFLACTAR}\""
+	    echo "... resulting resampled flac files with metadata available in this directory"
+	else
+    	    echo "Error creating tarball of original flac files"
+    	    echo "... please review the temporary files in \`${TMPTARGET}'"
+	fi
+    fi
+    
+    IFS=${SAVEIFS}
+
+}
+
+decode_flac() {
+
+    # try to decode source flac to wav file in temp directory 
+    echo "  running decode_flac with \"$1\" ($FILETYPE) and \"$2\" (PCM):"
+    if $("${FLAC}" -s -d -o "$2" "$1"); then
+        # move original FLAC to temporary directory
+	mv "$1" "${TMPTARGET}"
+	echo "  [ok]"
+	return 0
+    else
+	die "Error: something went wrong while decoding flac source \"$1\" to \"$2\" ..."
+    fi
+}
+
+resample_wav() {
+    echo " running resample_wav with \"$1\" and \"$2\":"
+    ssrc_hp --rate 96000 --bits 24 --twopass "$1" "$2"
+    echo "  [ok]"
+    # clean up original wav
+    rm "$1"
+    return 0
+}
+
+
+encode_toflac() {
+    
+    echo " running encode_toflac \"$1\" and \"$2\":"
+    if $("${FLAC}" -s "$1" -o "$2" ); then
+	echo " [ok]"
+	# clean up resampled wav
+	rm "$1"
+	return 0
+    else
+	die "Error: something went wrong while encoding \"${RESAMPLEDWAVPATH}\" to \"${SOURCEFLACPATH}\" ..."
+    fi
+}
+
+restore_flactags() {
+    echo " running restore_flactags \"$1\" and \"$2\":"
+    if $("${METAFLAC}" --export-tags-to - "$1" | "${METAFLAC}" --import-tags-from - "$2"); then
+	echo " [ok]"
+    else
+	echo "Error: Could not restore flac tags to \"$2\" ... "
+    fi
+}
+
+convert_file() {
+
+    # /full/path/01file.flac
+    INPUTFILEPATH="$1"
+    # 01file.flac
+    INPUTBASENAME=$(basename "${INPUTFILEPATH}")
+    # flac
+    INPUTEXTENSION="${INPUTBASENAME##*.}"
+    # 01file
+    INPUTNOEXT="${INPUTBASENAME%.*}"
+    # /full/path
+    INPUTDIRPATH=$(dirname "${INPUTFILEPATH}")
+    # 01file.wav
+    WAVFILENAME="${INPUTNOEXT}.wav"
+
+    ORIGINALWAVPATH="${TMPTARGET}/${WAVFILENAME}"
+    RESAMPLEDWAVPATH="${TMPTARGET}/Resampled ${WAVFILENAME}"
+    TMPFLACPATH="${TMPTARGET}/${INPUTBASENAME}"
+    
+
+    echo " running convert_file on \"${INPUTFILEPATH}\""
+
+    analyze_file "${INPUTFILEPATH}"
+
+    echo "  converting from ${FILEBD}-bit/${FILESR} Hz to ${BITDEPTH}-bit/${SAMPLERATE} Hz"
+
+    decode_flac "${INPUTFILEPATH}" "${ORIGINALWAVPATH}"
+
+    resample_wav "${ORIGINALWAVPATH}" "${RESAMPLEDWAVPATH}"
+
+    encode_toflac "${RESAMPLEDWAVPATH}" "${INPUTFILEPATH}"
+
+    restore_flactags "${TMPFLACPATH}" "${INPUTFILEPATH}"
+
+}
+
+# Main
+
+# Parse command line arguments
+if ! ARGS=$(getopt -n "$0" -o +a:b:cdhmpr -l \
+    'samplerate:,bitdepth:,list,upsample,downsample,purge,help' -- "$@"); then
+    exit 1
+fi
+
+# source the generic functions
+ . ./resample-commonfunctions
+ . ./analyze-file
+
+# include the configuration file if it exists
+#if [ -f /etc/resample/resample.conf ]; then
+#    . /etc/resample/resample.conf
+#fi
+
+# parse commandline parameters
+analyze_command_line "$@"
+
+# get defaults
+default_options
+
+# check existence of programs
+check_sanity
+
+
+#if [ $LIST ]; then
+#    list_sourcefiles
+#fi
+
+
+# verify samplerate and bitdepth
+#get_samplerate $SAMPLERATE
+#get_bitdepth $BITDEPTH
+
+
+echo "Preparing to process $DIR"
+# check sanity of source dir
+check_sourcedir  "$DIR"
+#list_sourcefiles "$DIR"
+convert_files "$DIR"
