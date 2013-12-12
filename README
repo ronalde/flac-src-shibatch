@@ -18,7 +18,11 @@ Requirements
 Installation of the former commands can be achieved on Debian based
 systems by executing:
 
-    sudo apt-get install flac ssrc sox
+    sudo apt-get install flac sox
+
+Installation of ssrc on Debian and Ubuntu can be achieved by following
+the instructions on
+http://lacocina.nl/2013/12/11/shibatch-ssrc-packages/.
 
 Background and usage
 --------------------
