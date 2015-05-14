@@ -22,12 +22,12 @@ systems by executing:
 
 Installation of ssrc on Debian and Ubuntu can be achieved by following
 the instructions on
-http://lacocina.nl/2013/12/11/shibatch-ssrc-packages/.
+http://lacocina.nl/shibatch-ssrc-packages/.
 
 Background and usage
 --------------------
 
--  [Script to convert FLAC files using Shibatch SRC while preserving meta data](http://www.lacocina.nl/artikelen/convert-flac-with-shibatch)
+-  [Script to convert FLAC files using Shibatch SRC while preserving meta data](http://lacocina.nl/convert-flac-with-shibatch)
 
 
 Default conversions
