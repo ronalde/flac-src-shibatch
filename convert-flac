@@ -75,7 +75,7 @@ check_sourcedir() {
     echo "\tChecking sanity of directory ..."
     if [ -d "$DIR" ]; then
 	if [ -w "$DIR" ]; then
-	    if [ -f "$1\${SRCFLACTAR}" ]; then
+	    if [ -f "$1/${SRCFLACTAR}" ]; then
 		die "Error: It seems you have converted directory \`${DIR}' before. /
                      If not, remove \`${SRCFLACTAR}' and try again."
 	    fi
